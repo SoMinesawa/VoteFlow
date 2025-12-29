@@ -19,7 +19,7 @@ from tqdm import tqdm
 BASE_DIR = os.path.abspath(os.path.join( os.path.dirname( __file__ ), '..' ))
 sys.path.append(BASE_DIR)
 
-def collate_fn_pad(batch):
+def collate_fn_pad(batch, for_test=False):
 
     num_frames = 2
     while f'pch{num_frames - 1}' in batch[0]:
@@ -72,6 +72,32 @@ def collate_fn_pad(batch):
         res_dict['pc1_dynamic'] = pc1_dynamic_after_mask_ground
 
     return res_dict
+
+def collate_fn_pad_test(batch):
+    """Collate function for test/inference with additional metadata for saving results."""
+    # Get base collated data
+    res_dict = collate_fn_pad(batch, for_test=True)
+    
+    # Add metadata needed for test_step (scene_id, timestamp, origin_pc0, gm0)
+    res_dict['scene_id'] = [batch[i]['scene_id'] for i in range(len(batch))]
+    res_dict['timestamp'] = [batch[i]['timestamp'] for i in range(len(batch))]
+    
+    # Store original pc0 and ground masks (padded) for flow computation
+    origin_pc0 = torch.nn.utils.rnn.pad_sequence(
+        [batch[i]['pc0'] for i in range(len(batch))], 
+        batch_first=True, padding_value=torch.nan
+    )
+    gm0 = torch.nn.utils.rnn.pad_sequence(
+        [batch[i]['gm0'] for i in range(len(batch))], 
+        batch_first=True, padding_value=True  # pad with True (ground) so padded points are ignored
+    )
+    res_dict['origin_pc0'] = origin_pc0
+    res_dict['gm0'] = gm0
+    
+    # Store valid lengths for each sample (number of non-ground points)
+    res_dict['valid_lengths'] = [batch[i]['pc0'][~batch[i]['gm0']].shape[0] for i in range(len(batch))]
+
+    return res_dict
 class HDF5Dataset(Dataset):
     def __init__(self,
                  directory,
@@ -99,9 +125,12 @@ class HDF5Dataset(Dataset):
         self.dufo = dufo
         self.n_frames = n_frames
         self.using_pwpp_gm = using_pwpp_gm
-        print('Using Patchwork++ ground mask:', self.using_pwpp_gm)
         data_path = self.directory.split('/')[:3]
         self.pwpp_gm_path = os.path.join(*data_path, 'patchworkpp_gm')
+        if self.using_pwpp_gm:
+            print(f'Using Patchwork++ ground mask from separate path: {self.pwpp_gm_path}')
+        else:
+            print('Using ground_mask from HDF5 (default)')
 
         if eval:
             eval_index_file = os.path.join(self.directory, 'index_eval.pkl')

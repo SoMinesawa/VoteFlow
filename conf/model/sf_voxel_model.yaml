@@ -1,0 +1,23 @@
+name: sf_voxel_model
+
+target:
+  _target_: src.models.SFVoxelModel
+  using_voting: True
+  nframes: 1
+  m: 8
+  n: 128
+  input_channels: 32
+  output_channels: 64
+  point_cloud_range: [-51.2, -51.2, -3, 51.2, 51.2, 3]
+  voxel_size: [0.2, 0.2, 6]
+  grid_feature_size: [512, 512, 1]
+  decoder: decoder
+  decoder_layers: 4
+  use_bn_in_vol: True
+  use_ball_query: False
+  use_separate_feats_voting: True
+  vol_conv_hidden_dim: 16
+
+val_monitor: val/Dynamic/Mean
+exp_id: ${model.name}_m_${model.target.m}_n_${model.target.n}
+

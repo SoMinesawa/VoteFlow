@@ -355,7 +355,65 @@ class ModelWrapper(LightningModule):
                 print(f'Batch:{batch_idx} has error!')
 
     def test_step(self, batch, batch_idx):
-        batch, res_dict = self.run_model_wo_ground_data(batch)
+        # Check if batch is from collate_fn_pad_test (batched) or single sample
+        if 'valid_lengths' in batch:
+            # Batched inference path
+            self._test_step_batched(batch)
+        else:
+            # Legacy single sample path
+            batch, res_dict = self.run_model_wo_ground_data(batch)
+            self._save_single_result(batch, res_dict)
+    
+    def _test_step_batched(self, batch):
+        """Handle batched inference with collate_fn_pad_test."""
+        # Run model forward (model already handles NaN padding)
+        self.model.timer[12].start("One Scan")
+        res_dict = self.model(batch)
+        self.model.timer[12].stop()
+        
+        batch_size = len(batch['pose0'])
+        
+        # Process each sample in the batch
+        for b in range(batch_size):
+            # Extract per-sample data
+            origin_pc0 = batch['origin_pc0'][b]  # (max_N, 3)
+            gm0 = batch['gm0'][b]  # (max_N,)
+            pose0 = batch['pose0'][b]
+            pose1 = batch['pose1'][b]
+            scene_id = batch['scene_id'][b]
+            timestamp = batch['timestamp'][b]
+            
+            # Remove NaN padding from origin_pc0 and gm0
+            valid_mask = ~torch.isnan(origin_pc0).any(dim=1)
+            origin_pc0 = origin_pc0[valid_mask]
+            gm0 = gm0[valid_mask]
+            
+            # Calculate pose flow
+            pose_0to1 = cal_pose0to1(pose0, pose1)
+            transform_pc0 = origin_pc0 @ pose_0to1[:3, :3].T + pose_0to1[:3, 3]
+            pose_flow = transform_pc0 - origin_pc0
+            
+            final_flow = pose_flow.clone()
+            
+            # Extract per-sample model output
+            # res_dict['flow'][b] already has correct size for valid points
+            if 'pc0_valid_point_idxes' in res_dict:
+                valid_from_pc2res = res_dict['pc0_valid_point_idxes'][b]
+                pred_flow_b = res_dict['flow'][b]  # flow for valid voxelized points
+                
+                pred_flow = pose_flow[~gm0].clone()
+                # pred_flow_b corresponds to valid_from_pc2res indices
+                pred_flow[valid_from_pc2res] = pose_flow[~gm0][valid_from_pc2res] + pred_flow_b
+                final_flow[~gm0] = pred_flow
+            else:
+                pred_flow_b = res_dict['flow'][b]
+                final_flow[~gm0] = pred_flow_b + pose_flow[~gm0]
+            
+            # Save result
+            self._save_result(scene_id, timestamp, final_flow)
+    
+    def _save_single_result(self, batch, res_dict):
+        """Save result for single sample (legacy path)."""
         pc0 = batch['origin_pc0']
         pose_0to1 = cal_pose0to1(batch["pose0"], batch["pose1"])
         transform_pc0 = pc0 @ pose_0to1[:3, :3].T + pose_0to1[:3, 3]
@@ -364,35 +422,36 @@ class ModelWrapper(LightningModule):
         final_flow = pose_flow.clone()
         if 'pc0_valid_point_idxes' in res_dict:
             valid_from_pc2res = res_dict['pc0_valid_point_idxes']
-
-            # flow in the original pc0 coordinate
             pred_flow = pose_flow[~batch['gm0']].clone()
             pred_flow[valid_from_pc2res] = pose_flow[~batch['gm0']][valid_from_pc2res] + res_dict['flow']
-
             final_flow[~batch['gm0']] = pred_flow
         else:
             final_flow[~batch['gm0']] = res_dict['flow'] + pose_flow[~batch['gm0']]
 
-        # write final_flow into the dataset.
-        key = str(batch['timestamp'])
-        scene_id = batch['scene_id']
-        ## hard code to save outputs
+        self._save_result(batch['scene_id'], batch['timestamp'], final_flow)
+    
+    def _save_result(self, scene_id, timestamp, final_flow):
+        """Save final flow to pickle and HDF5."""
+        key = str(timestamp)
+        
+        # Save to pickle
         save_dir = f'outputs/{self.vis_name}'
-        sub_dir = os.path.join(save_dir,f'{scene_id}')
+        sub_dir = os.path.join(save_dir, f'{scene_id}')
         if not os.path.exists(sub_dir):
                 os.makedirs(sub_dir)
-        file = os.path.join(sub_dir,f'{key}.pkl')
-        data_dict =dict(
-            input_batch = batch,
-            model_output = res_dict,
-            final_flow = final_flow
-        )
+        file = os.path.join(sub_dir, f'{key}.pkl')
+        data_dict = dict(final_flow=final_flow)
         pickle.dump(data_dict, open(file, 'wb'))
         
-        # with h5py.File(os.path.join(self.dataset_path, f'{scene_id}.h5'), 'r+') as f:
-        #     if self.vis_name in f[key]:
-        #         del f[key][self.vis_name]
-        #     f[key].create_dataset(self.vis_name, data=final_flow.cpu().detach().numpy().astype(np.float32))
+        # Save to HDF5 (skip if file locking fails, e.g., on NFS)
+        try:
+            with h5py.File(os.path.join(self.dataset_path, f'{scene_id}.h5'), 'r+') as f:
+                if self.vis_name in f[key]:
+                    del f[key][self.vis_name]
+                f[key].create_dataset(self.vis_name, data=final_flow.cpu().detach().numpy().astype(np.float32))
+        except (BlockingIOError, OSError) as e:
+            # Skip HDF5 write on NFS lock errors - results are still saved in pickle
+            pass
 
     def on_test_epoch_end(self):
         self.model.timer.print(random_colors=False, bold=False)

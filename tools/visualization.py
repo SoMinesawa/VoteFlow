@@ -29,8 +29,9 @@ def check_flow(
     res_name: str = "flow", # "flow", "flow_est"
     start_id: int = 0,
     point_size: float = 3.0,
+    pickle_dir: str = None,  # e.g., "outputs/flow_est" for pickle-based flow
 ):
-    dataset = HDF5Data(data_dir, vis_name=res_name, flow_view=True)
+    dataset = HDF5Data(data_dir, vis_name=res_name, flow_view=True, pickle_dir=pickle_dir)
     o3d_vis = MyVisualizer(view_file=VIEW_FILE, window_title=f"view {'ground truth flow' if res_name == 'flow' else f'{res_name} flow'}, `SPACE` start/stop")
 
     opt = o3d_vis.vis.get_render_option()
@@ -64,8 +65,9 @@ def vis(
     res_name: str = "flow", # "flow", "flow_est"
     start_id: int = -1,
     point_size: float = 2.0,
+    pickle_dir: str = None,  # e.g., "outputs/flow_est" for pickle-based flow
 ):
-    dataset = HDF5Data(data_dir, vis_name=res_name, flow_view=True)
+    dataset = HDF5Data(data_dir, vis_name=res_name, flow_view=True, pickle_dir=pickle_dir)
     o3d_vis = MyVisualizer(view_file=VIEW_FILE, window_title=f"view {'ground truth flow' if res_name == 'flow' else f'{res_name} flow'}, `SPACE` start/stop")
 
     opt = o3d_vis.vis.get_render_option()

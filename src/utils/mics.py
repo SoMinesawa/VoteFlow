@@ -234,14 +234,26 @@ def flow_to_rgb(
 
 
 class HDF5Data:
-    def __init__(self, directory, flow_view=False, vis_name="flow"):
+    def __init__(self, directory, flow_view=False, vis_name="flow", pickle_dir=None):
         '''
-        directory: the directory of the dataset
-        t_x: how many past frames we want to extract
+        directory: the directory of the dataset (HDF5 files)
+        flow_view: if True, load next frame data for flow visualization
+        vis_name: name of the flow field to visualize
+        pickle_dir: directory containing pickle files (outputs/{vis_name}/), 
+                    if None, will try 'outputs/{vis_name}' relative to workspace
         '''
         self.flow_view = flow_view
         self.vis_name = vis_name
         self.directory = directory
+        self.pickle_dir = pickle_dir
+        
+        # Try to find pickle directory if not specified
+        if self.pickle_dir is None:
+            # Try relative to current working directory
+            candidate = os.path.join('outputs', vis_name)
+            if os.path.exists(candidate):
+                self.pickle_dir = candidate
+        
         with open(os.path.join(self.directory, 'index_total.pkl'), 'rb') as f:
             self.data_index = pickle.load(f)
 
@@ -264,6 +276,22 @@ class HDF5Data:
                 if timestamp > bounds["max_timestamp"]:
                     bounds["max_timestamp"] = timestamp
                     bounds["max_index"] = idx
+
+    def _load_flow_from_pickle(self, scene_id, timestamp):
+        """Try to load flow from pickle file."""
+        if self.pickle_dir is None:
+            return None
+        pickle_path = os.path.join(self.pickle_dir, scene_id, f'{timestamp}.pkl')
+        if os.path.exists(pickle_path):
+            with open(pickle_path, 'rb') as f:
+                data = pickle.load(f)
+                if 'final_flow' in data:
+                    # Convert to numpy if it's a tensor
+                    flow = data['final_flow']
+                    if hasattr(flow, 'cpu'):
+                        flow = flow.cpu().numpy()
+                    return flow
+        return None
 
     def __len__(self):
         return len(self.data_index)
@@ -294,8 +322,15 @@ class HDF5Data:
                 data_dict['pose1'] = f[next_timestamp]['pose'][:]
                 data_dict['pc1'] = f[next_timestamp]['lidar'][:]
                 data_dict['gm1'] = f[next_timestamp]['ground_mask'][:]
+        
+        # If vis_name not found in HDF5, try loading from pickle
+        if self.vis_name not in data_dict:
+            flow_from_pickle = self._load_flow_from_pickle(scene_id, key)
+            if flow_from_pickle is not None:
+                data_dict[self.vis_name] = flow_from_pickle
             elif self.flow_view:
                 print(f"[Warning]: No {self.vis_name} in {scene_id} at {timestamp}, check the data.")
+        
         return data_dict
     
 from av2.geometry.se3 import SE3
