@@ -4,11 +4,17 @@
 # 
 # SemanticKITTI data structure:
 #   sequences/XX/velodyne/*.bin  - point cloud (N, 4) float32 (x, y, z, intensity)
-#   sequences/XX/poses.txt       - poses (4x4 matrix per line, 12 values)
+#   sequences/XX/poses.txt       - poses (4x4 matrix per line, 12 values) in Camera0 coordinate
+#   sequences/XX/calib.txt       - calibration (Tr: Velodyne to Camera0 transformation)
 #   sequences/XX/labels/*.label  - semantic labels (optional)
 # 
 # Patchwork++ ground mask structure:
 #   sequences/XX/predictions/*.label - ground mask (N,) uint32 (1=ground, 0=non-ground)
+#
+# NOTE: KITTI poses.txt is in Camera0 coordinate system, but point clouds are in Velodyne
+#       coordinate system. We need to convert poses to Velodyne coordinate system using
+#       the calibration matrix Tr from calib.txt.
+#       Formula: pose_velo = pose_cam @ Tr (where Tr = cam_T_velo)
 """
 
 import os
@@ -70,6 +76,28 @@ def load_patchwork_ground_mask(label_path: str) -> np.ndarray:
     return labels == 1
 
 
+def load_calib(calib_path: str) -> np.ndarray:
+    """Load calibration matrix Tr from KITTI calib.txt file.
+    
+    Tr is the transformation from Velodyne to Camera0 coordinate system.
+    p_cam = Tr @ p_velo
+    
+    Args:
+        calib_path: Path to calib.txt
+        
+    Returns:
+        4x4 transformation matrix (Velodyne to Camera0)
+    """
+    Tr = np.eye(4, dtype=np.float64)
+    with open(calib_path, 'r') as f:
+        for line in f:
+            if line.startswith('Tr:'):
+                values = [float(v) for v in line.strip().split()[1:]]
+                Tr[:3, :] = np.array(values).reshape(3, 4)
+                break
+    return Tr
+
+
 def process_sequence(args):
     """Process a single sequence.
     
@@ -84,12 +112,16 @@ def process_sequence(args):
     seq_path = Path(data_dir) / "sequences" / seq_id
     velodyne_dir = seq_path / "velodyne"
     poses_file = seq_path / "poses.txt"
+    calib_file = seq_path / "calib.txt"
     
     if not velodyne_dir.exists():
         raise FileNotFoundError(f"Sequence {seq_id}: velodyne directory not found at {velodyne_dir}")
     
     if not poses_file.exists():
         raise FileNotFoundError(f"Sequence {seq_id}: poses.txt not found at {poses_file}")
+    
+    if not calib_file.exists():
+        raise FileNotFoundError(f"Sequence {seq_id}: calib.txt not found at {calib_file}")
     
     # Check Patchwork++ directory exists
     if not patchwork_dir:
@@ -102,8 +134,15 @@ def process_sequence(args):
             "Please ensure Patchwork++ ground masks are available for all sequences."
         )
     
-    # Load poses
-    poses = load_poses(str(poses_file))
+    # Load calibration matrix (Velodyne to Camera0)
+    # Tr = cam_T_velo, so pose_velo = pose_cam @ Tr
+    Tr = load_calib(str(calib_file))
+    
+    # Load poses (in Camera0 coordinate system) and convert to Velodyne coordinate system
+    poses_cam = load_poses(str(poses_file))
+    # Convert poses from Camera0 to Velodyne coordinate system
+    # world_T_velo = world_T_cam @ cam_T_velo = pose_cam @ Tr
+    poses = np.array([pose_cam @ Tr for pose_cam in poses_cam], dtype=np.float32)
     
     # Get list of scans
     scan_files = sorted([f for f in os.listdir(velodyne_dir) if f.endswith('.bin')])

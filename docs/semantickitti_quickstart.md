@@ -44,7 +44,7 @@ HDF5_USE_FILE_LOCKING=FALSE python save.py --config-name=save_semantickitti \
 ```
 
 出力:
-- `outputs/flow_est/{seq_id}/{frame_id}.pkl`
+- `voteflow_preprocess/results/flow_est/{seq_id}/{frame_id}.pkl`
 - `voteflow_preprocess/*.h5` に `flow_est` が追加
 
 ## 4. 可視化
@@ -77,13 +77,16 @@ voteflow_preprocess/
 
 ### 推論後
 ```
-voteflow_preprocess/00.h5
-└── 000000/
-    ├── lidar
-    ├── ground_mask
-    ├── pose
-    └── flow_est  ← 追加
-
-outputs/flow_est/00/000000.pkl  ← バックアップ
+voteflow_preprocess/
+├── 00.h5
+│   └── 000000/
+│       ├── lidar
+│       ├── ground_mask
+│       ├── pose
+│       └── flow_est  ← 追加
+└── results/
+    └── flow_est/
+        └── 00/
+            └── 000000.pkl  ← バックアップ
 ```
 

@@ -434,8 +434,8 @@ class ModelWrapper(LightningModule):
         """Save final flow to pickle and HDF5."""
         key = str(timestamp)
         
-        # Save to pickle
-        save_dir = f'outputs/{self.vis_name}'
+        # Save to pickle - now saves next to HDF5 files instead of outputs/
+        save_dir = os.path.join(self.dataset_path, 'results', self.vis_name)
         sub_dir = os.path.join(save_dir, f'{scene_id}')
         if not os.path.exists(sub_dir):
                 os.makedirs(sub_dir)

@@ -32,7 +32,8 @@ setup(
     # no change below
     description='OpenMMLab Computer Vision Foundation',
     keywords='computer vision',
-    packages=find_packages(),
+    packages=['mmcv', 'mmcv.ops'],
+    package_dir={'mmcv': '.', 'mmcv.ops': 'ops'},
     include_package_data=True,
     classifiers=[
         'Development Status :: 4 - Beta',
