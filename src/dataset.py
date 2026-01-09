@@ -107,7 +107,8 @@ class HDF5Dataset(Dataset):
                  eval_per_scene=False,
                  scene_id=None,
                  leaderboard_version=1,
-                 using_pwpp_gm=False
+                 using_pwpp_gm=False,
+                 pair_stride=1
                  ):
         '''
         directory: the directory of the dataset
@@ -117,6 +118,7 @@ class HDF5Dataset(Dataset):
         '''
         super(HDF5Dataset, self).__init__()
         self.directory = directory
+        self.pair_stride = max(1, int(pair_stride))
         
         with open(os.path.join(self.directory, 'index_total.pkl'), 'rb') as f:
             self.data_index = pickle.load(f)
@@ -172,23 +174,35 @@ class HDF5Dataset(Dataset):
                     bounds["max_timestamp"] = timestamp
                     bounds["max_index"] = idx
 
+        # pair_stride に対応する有効インデックスを事前計算（次フレームが同一シーン内に存在するもののみ）
+        self.valid_indices = []
+        for idx, (scene_id, _) in enumerate(self.data_index):
+            nxt = idx + self.pair_stride
+            if nxt < len(self.data_index) and self.data_index[nxt][0] == scene_id:
+                self.valid_indices.append(idx)
+
     def __len__(self):
         if self.eval_index:
             return len(self.eval_data_index)
-        return len(self.data_index)
+        return len(self.valid_indices)
     
     def __getitem__(self, index_):
         if self.eval_index:
             scene_id, timestamp = self.eval_data_index[index_]
             # find this one index in the total index
             index_ = self.data_index.index([scene_id, timestamp])
+            base_idx = index_
+            # ensure next frame within same scene and range
+            max_start = max(self.scene_id_bounds[scene_id]["min_index"],
+                            self.scene_id_bounds[scene_id]["max_index"] - self.pair_stride)
+            if base_idx > max_start:
+                base_idx = max_start
+            if base_idx + self.pair_stride >= len(self.data_index) or self.data_index[base_idx + self.pair_stride][0] != scene_id:
+                # fall back to safe start inside scene
+                base_idx = self.scene_id_bounds[scene_id]["max_index"] - self.pair_stride
         else:
-            scene_id, timestamp = self.data_index[index_]
-            # to make sure we have continuous frames
-            if self.scene_id_bounds[scene_id]["max_index"] == index_:
-                index_ = index_ - 1
-            # get the data again
-            scene_id, timestamp = self.data_index[index_]
+            base_idx = self.valid_indices[index_]
+            scene_id, timestamp = self.data_index[base_idx]
 
         key = str(timestamp)
         with h5py.File(os.path.join(self.directory, f'{scene_id}.h5'), 'r') as f:
@@ -200,7 +214,7 @@ class HDF5Dataset(Dataset):
                 gm0 = torch.tensor(f[key]['ground_mask'][:])
             pose0 = torch.tensor(f[key]['pose'][:])
 
-            next_timestamp = str(self.data_index[index_+1][1])
+            next_timestamp = str(self.data_index[base_idx + self.pair_stride][1])
             pc1 = torch.tensor(f[next_timestamp]['lidar'][:][:,:3])
             if self.using_pwpp_gm:
                 with h5py.File(os.path.join(self.pwpp_gm_path, f'{scene_id}.h5'), 'r') as f1:
@@ -225,7 +239,7 @@ class HDF5Dataset(Dataset):
                 num_past_frames = self.n_frames - 2  
 
                 for i in range(1, num_past_frames + 1):
-                    frame_index = index_ - i
+                    frame_index = base_idx - i * self.pair_stride
                     if frame_index < self.scene_id_bounds[scene_id]["min_index"]: 
                         frame_index = self.scene_id_bounds[scene_id]["min_index"] 
 

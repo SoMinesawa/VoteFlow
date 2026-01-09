@@ -239,20 +239,34 @@ class HDF5Data:
         directory: the directory of the dataset (HDF5 files)
         flow_view: if True, load next frame data for flow visualization
         vis_name: name of the flow field to visualize
-        pickle_dir: directory containing pickle files (outputs/{vis_name}/), 
-                    if None, will try 'outputs/{vis_name}' relative to workspace
+        pickle_dir: directory containing pickle files (e.g., {data_dir}/results/{vis_name}/ or outputs/{vis_name}/),
+                    if None, will try to auto-detect common locations.
         '''
         self.flow_view = flow_view
-        self.vis_name = vis_name
+        # NOTE: fire can pass repeated flags as tuple/list (e.g., --vis_name a b),
+        # but HDF5 keys must be str/bytes. We only keep the first element here.
+        if isinstance(vis_name, (tuple, list)):
+            if len(vis_name) == 0:
+                self.vis_name = "flow"
+            else:
+                print(f"[Warning] vis_name is {type(vis_name)}={vis_name}. Use the first element: {vis_name[0]}")
+                self.vis_name = str(vis_name[0])
+        else:
+            self.vis_name = vis_name
         self.directory = directory
         self.pickle_dir = pickle_dir
         
         # Try to find pickle directory if not specified
         if self.pickle_dir is None:
-            # Try relative to current working directory
-            candidate = os.path.join('outputs', vis_name)
-            if os.path.exists(candidate):
-                self.pickle_dir = candidate
+            dataset_dir = os.fspath(self.directory)
+            candidates = [
+                os.path.join(dataset_dir, "results", vis_name),  # recommended by docs
+                os.path.join("outputs", vis_name),               # legacy/default
+            ]
+            for candidate in candidates:
+                if os.path.exists(candidate):
+                    self.pickle_dir = candidate
+                    break
         
         with open(os.path.join(self.directory, 'index_total.pkl'), 'rb') as f:
             self.data_index = pickle.load(f)

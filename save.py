@@ -58,7 +58,12 @@ def main(cfg):
                                offline=True)
     
     # set up dataset/dataloader explicitly to measure runtime
-    dataset = HDF5Dataset(cfg.dataset_path, n_frames=checkpoint_params.cfg.num_frames if 'num_frames' in checkpoint_params.cfg else 2)
+    pair_stride = cfg.pair_stride if 'pair_stride' in cfg else 1
+    dataset = HDF5Dataset(
+        cfg.dataset_path,
+        n_frames=checkpoint_params.cfg.num_frames if 'num_frames' in checkpoint_params.cfg else 2,
+        pair_stride=pair_stride
+    )
     batch_size = cfg.batch_size if 'batch_size' in cfg else 1
     base_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, 
                              collate_fn=collate_fn_pad_test, num_workers=4, pin_memory=True)
@@ -78,7 +83,8 @@ def main(cfg):
 
     dataloader = TqdmDataLoader(base_loader)
     
-    trainer = pl.Trainer(logger=wandb_logger, devices=cfg.gpus)
+    # Lightningのprogress barはオフにし、こちらのtqdm（dataloader側）だけ表示
+    trainer = pl.Trainer(logger=wandb_logger, devices=cfg.gpus, enable_progress_bar=False)
     # NOTE(Qingwen): search & check in pl_model.py : def test_step(self, batch, res_dict)
     t0 = time.time()
     trainer.test(model = mymodel, dataloaders = dataloader)

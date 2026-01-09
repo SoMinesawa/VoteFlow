@@ -2,6 +2,7 @@ dataset_path: data/dataset/semantickitti/voteflow_preprocess
 checkpoint: checkpoints/voteflow_best_m8n128_ori.ckpt
 res_name: flow_est  # result name, will be saved in outputs/{res_name}/ and HDF5 files
 batch_size: 8  # batch size for inference
+pair_stride: 1  # frame stride between pc0 and pc1 (nuScenes 10Hz化なら2)
 
 # no need to change
 defaults:
