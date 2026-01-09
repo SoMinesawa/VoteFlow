@@ -34,11 +34,33 @@ python dataprocess/extract_semantickitti.py \
 
 出力: `voteflow_preprocess/` に HDF5 ファイルが生成される。
 
+### （テスト用）1シーケンスだけ前処理したい場合
+
+`--sequences` で対象シーケンスを絞れます（例: `00`）。既存の出力ディレクトリを上書きすると混乱しやすいので、別ディレクトリに出すのがおすすめです。
+
+```bash
+python dataprocess/extract_semantickitti.py \
+  --kitti_dir data/dataset/semantickitti/dataset \
+  --patchwork_dir data/users/minesawa/semantickitti/patchwork-plusplus \
+  --output_dir data/dataset/semantickitti/voteflow_preprocess_seq00 \
+  --sequences 00 \
+  --nproc 16
+```
+
 ## 3. 推論
 
 ```bash
 HDF5_USE_FILE_LOCKING=FALSE python save.py --config-name=save_semantickitti \
   checkpoint=checkpoints/voteflow_best_m8n128_ori.ckpt \
+  res_name=flow_est \
+  batch_size=8
+```
+
+（テスト用）既に全シーケンス入りの `dataset_path` がある場合でも、`scene_id` を指定すると **1シーケンスだけ**推論できます（先頭ゼロがあるのでクォート推奨）：
+
+```bash
+HDF5_USE_FILE_LOCKING=FALSE python save.py --config-name=save_semantickitti \
+  scene_id="'00'" \
   res_name=flow_est \
   batch_size=8
 ```
@@ -53,6 +75,7 @@ HDF5_USE_FILE_LOCKING=FALSE python save.py --config-name=save_semantickitti \
 python tools/visualization.py vis \
   --data_dir data/dataset/semantickitti/voteflow_preprocess \
   --res_name flow_est \
+  --scene_id 00 \
   --start_id 0 \
   --point_size 2.0
 ```

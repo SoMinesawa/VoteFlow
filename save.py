@@ -59,10 +59,12 @@ def main(cfg):
     
     # set up dataset/dataloader explicitly to measure runtime
     pair_stride = cfg.pair_stride if 'pair_stride' in cfg else 1
+    scene_id = cfg.scene_id if 'scene_id' in cfg else None
     dataset = HDF5Dataset(
         cfg.dataset_path,
         n_frames=checkpoint_params.cfg.num_frames if 'num_frames' in checkpoint_params.cfg else 2,
-        pair_stride=pair_stride
+        pair_stride=pair_stride,
+        scene_id=scene_id,
     )
     batch_size = cfg.batch_size if 'batch_size' in cfg else 1
     base_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, 

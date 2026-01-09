@@ -123,6 +123,28 @@ class HDF5Dataset(Dataset):
         with open(os.path.join(self.directory, 'index_total.pkl'), 'rb') as f:
             self.data_index = pickle.load(f)
 
+        # Optional: restrict dataset to specific scene(s) for quick testing/inference.
+        # NOTE: This is applied only in normal (non-eval) mode.
+        # scene_id can be:
+        #   - "00" (single)
+        #   - "00,01" (comma-separated)
+        #   - ["00", "01"] (list/tuple)
+        if (scene_id is not None) and (not eval) and (not eval_per_scene):
+            if isinstance(scene_id, (list, tuple, set)):
+                allowed_scene_ids = {str(s).strip() for s in scene_id if str(s).strip()}
+            else:
+                allowed_scene_ids = {s.strip() for s in str(scene_id).split(",") if s.strip()}
+
+            if len(allowed_scene_ids) > 0:
+                original_len = len(self.data_index)
+                self.data_index = [x for x in self.data_index if str(x[0]) in allowed_scene_ids]
+                if len(self.data_index) == 0:
+                    raise ValueError(
+                        f"No entries found for scene_id(s)={sorted(allowed_scene_ids)} in "
+                        f"{os.path.join(self.directory, 'index_total.pkl')}"
+                    )
+                print(f"[HDF5Dataset] Filter scene_id(s)={sorted(allowed_scene_ids)}: {len(self.data_index)}/{original_len} frames")
+
         self.eval_index = False
         self.dufo = dufo
         self.n_frames = n_frames

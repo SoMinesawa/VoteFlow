@@ -60,7 +60,9 @@ def _as_numpy_flow(flow):
 def _resolve_pickle_dir(data_dir: str, res_name: str, pickle_dir: str = None):
     """Pickle directory resolution (priority: explicit -> data_dir/results -> outputs)."""
     if pickle_dir is not None:
-        return pickle_dir
+        # If user passes an invalid path, fall back to auto-detection.
+        if os.path.exists(pickle_dir):
+            return pickle_dir
     c1 = os.path.join(data_dir, "results", res_name)
     if os.path.exists(c1):
         return c1
@@ -124,6 +126,7 @@ def _get_flow_value(data: dict, data_dir: str, res_name: str, pickle_dir: str = 
 def check_flow(
     data_dir: str ="/home/kin/data/av2/preprocess/sensor/mini",
     res_name: str = "flow", # "flow", "flow_est"
+    scene_id: str = None,   # optional: restrict to one scene/sequence id (e.g., "00" for SemanticKITTI)
     start_id: int = 0,
     point_size: float = 3.0,
     pickle_dir: str = None,  # e.g., "outputs/flow_est" for pickle-based flow
@@ -135,7 +138,20 @@ def check_flow(
     opt.background_color = np.asarray([80/255, 90/255, 110/255])
     opt.point_size = point_size
 
-    for data_id in (pbar := tqdm(range(start_id, len(dataset)))):
+    # Resolve iteration range
+    if scene_id is not None:
+        sid = str(scene_id)
+        if sid not in dataset.scene_id_bounds:
+            raise ValueError(f"scene_id={sid} not found. Available: {sorted(dataset.scene_id_bounds.keys())}")
+        bounds = dataset.scene_id_bounds[sid]
+        # flow_view needs next frame, exclude last frame to avoid duplication
+        scene_start = bounds["min_index"] + max(0, int(start_id))
+        scene_end = bounds["max_index"]  # exclusive end
+        ids = range(scene_start, max(scene_start, scene_end))
+    else:
+        ids = range(start_id, len(dataset))
+
+    for data_id in (pbar := tqdm(ids)):
         data = dataset[data_id]
         now_scene_id = data['scene_id']
         pbar.set_description(f"id: {data_id}, scene_id: {now_scene_id}, timestamp: {data['timestamp']}")
@@ -160,6 +176,7 @@ def check_flow(
 def vis(
     data_dir: str ="/home/kin/data/av2/preprocess/sensor/mini",
     res_name: str = "flow", # "flow", "flow_est"
+    scene_id: str = None,   # optional: restrict to one scene/sequence id (e.g., "00" for SemanticKITTI)
     start_id: int = -1,
     point_size: float = 2.0,
     pickle_dir: str = None,  # e.g., "outputs/flow_est" for pickle-based flow
@@ -167,7 +184,14 @@ def vis(
     flow_max_radius: float = None,  # override normalization radius (for fair comparisons)
 ):
     res_names = _parse_res_names(res_name)
-    dataset = HDF5Data(data_dir, vis_name=res_names[0], flow_view=True, pickle_dir=pickle_dir)
+    # NOTE: for multi-field visualization, we don't rely on HDF5Data to load flow fields,
+    # and some datasets (e.g., nuScenes preprocess) may not contain the first res_name.
+    # Use a stable existing key to avoid per-frame warnings.
+    dataset_vis_name = res_names[0] if len(res_names) == 1 else "pose"
+    dataset = HDF5Data(data_dir, vis_name=dataset_vis_name, flow_view=True, pickle_dir=pickle_dir)
+
+    if pickle_dir is not None and not os.path.exists(pickle_dir):
+        print(f"[Warning] pickle_dir not found: {pickle_dir}. Will try '{data_dir}/results/<res_name>' and 'outputs/<res_name>' automatically.")
 
     if len(res_names) > 1:
         title = f"view flow fields: {', '.join(res_names)} | [T] toggle | [SPACE] start/stop"
@@ -206,7 +230,20 @@ def vis(
         print("\t[T] to toggle flow field")
         o3d_vis._register_key_callback(["T"], _toggle_flow)
 
-    for data_id in (pbar := tqdm(range(start_id, len(dataset)))):
+    # Resolve iteration range
+    if scene_id is not None:
+        sid = str(scene_id)
+        if sid not in dataset.scene_id_bounds:
+            raise ValueError(f"scene_id={sid} not found. Available: {sorted(dataset.scene_id_bounds.keys())}")
+        bounds = dataset.scene_id_bounds[sid]
+        # flow_view needs next frame, exclude last frame to avoid duplication
+        scene_start = bounds["min_index"] + max(0, int(start_id))
+        scene_end = bounds["max_index"]  # exclusive end
+        ids = range(scene_start, max(scene_start, scene_end))
+    else:
+        ids = range(start_id, len(dataset))
+
+    for data_id in (pbar := tqdm(ids)):
         data = dataset[data_id]
         now_scene_id = data['scene_id']
         pbar.set_description(f"id: {data_id}, scene_id: {now_scene_id}, timestamp: {data['timestamp']}")
